@@ -145,7 +145,7 @@
 
         // Build letter regions for repeat detection
         (function buildLetterRegions(){
-          const maxWidth = Math.min(canvas.width * 0.7, 900);
+          const maxWidth = Math.min(canvas.width * 0.8, 900);
           const baseFont = Math.max(64, Math.min(240, Math.floor(maxWidth / Math.max(3, nameText.length) * 1.1)));
           oc.width = Math.max(1, Math.floor(maxWidth));
           oc.height = Math.max(1, Math.floor(baseFont * 1.6));
@@ -181,16 +181,16 @@
         const { pts: initialPts } = generateConstellationWithLetters(nameText);
         constellation = initialPts;
 
-        // Progressive reveal state (faster)
-        let reveal = 0; // number of points revealed
-        const revealSpeed = Math.max(40, 160 - Math.floor(tempo*60)); // ms per star (faster)
+        // Progressive reveal state
+        let reveal = 0;
+        const revealSpeed = Math.max(40, 160 - Math.floor(tempo*60));
         let lastReveal = performance.now();
         let revealCompleted = false;
         
         // Lightning strike effect
         let lightningStrike = false;
         let lightningTime = 0;
-        let lightningDuration = 3000; // lightning flash duration - increased to 3 seconds for slower effect
+        let lightningDuration = 3000;
         let explosionParticles = [];
         let explosionStarted = false;
 
@@ -231,7 +231,6 @@
           e.preventDefault();
           const delta = -Math.sign(e.deltaY) * 0.15;
           const target = Math.min(viewMax, Math.max(viewMin, view.scale * (1 + delta)));
-          // Zoom towards cursor
           const before = screenToWorld(e.clientX, e.clientY);
           view.scale = target;
           const after = screenToWorld(e.clientX, e.clientY);
@@ -287,7 +286,7 @@
           ctx.save();
           ctx.globalCompositeOperation = 'screen';
           for (const s of dust) {
-            const twinkle = (Math.sin(t*0.0015 + s.tw) + 1)/2; // 0..1
+            const twinkle = (Math.sin(t*0.0015 + s.tw) + 1)/2;
             const alpha = 0.12 + twinkle*0.4;
             ctx.fillStyle = `hsla(${hueBase}, 100%, ${70 + twinkle*20}%, ${alpha})`;
             ctx.beginPath();
@@ -320,7 +319,6 @@
         }
 
         function drawShootingStars(dt){
-          // spawn occasionally
           lastShoot += dt;
           if (lastShoot > 2000 + rnd()*2500) { lastShoot = 0; spawnShootingStar(); }
           ctx.save();
@@ -359,24 +357,24 @@
           }
           const N = Math.max(1, reveal);
           
-          // Start fade out after reveal completes
+          // Start delay before lightning strike
           if (!revealCompleted && N >= constellation.length) {
             revealCompleted = true;
-            // Trigger lightning strike instead of fade out
-            lightningStrike = true;
-            lightningTime = now;
-            // Create explosion particles from constellation points
-            explosionParticles = constellation.map(p => ({
-              x: p.x,
-              y: p.y,
-              vx: (rnd() - 0.5) * 400, // random velocity
-              vy: (rnd() - 0.5) * 400,
-              life: 1.0,
-              maxLife: 1.0,
-              size: p.r * 0.8,
-              hue: hueAccent
-            }));
-            explosionStarted = true;
+            setTimeout(() => {
+              lightningStrike = true;
+              lightningTime = performance.now();
+              explosionParticles = constellation.map(p => ({
+                x: p.x,
+                y: p.y,
+                vx: (rnd() - 0.5) * 400,
+                vy: (rnd() - 0.5) * 400,
+                life: 1.0,
+                maxLife: 1.0,
+                size: p.r * 0.8,
+                hue: hueAccent
+              }));
+              explosionStarted = true;
+            }, 1000); // 2-second delay
           }
           
           // Lightning strike effect
@@ -387,30 +385,25 @@
               return; // Don't render constellation after lightning
             }
             
-            // Lightning flash effect - only on constellation area
-            if (lightningProgress < 0.6) { // Increased from 0.3 to 0.6 for longer flash
+            if (lightningProgress < 0.6) {
               ctx.save();
               ctx.globalCompositeOperation = 'screen';
               
-              // Calculate constellation bounds
               const minX = Math.min(...constellation.map(p => p.x));
               const maxX = Math.max(...constellation.map(p => p.x));
               const minY = Math.min(...constellation.map(p => p.y));
               const maxY = Math.max(...constellation.map(p => p.y));
               const padding = 50;
               
-              // Draw lightning flash only in constellation area - more gradual fade
               ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * (1 - lightningProgress/0.6)})`;
               ctx.fillRect(minX - padding, minY - padding, maxX - minX + 2*padding, maxY - minY + 2*padding);
               ctx.restore();
             }
             
-            // Fade out constellation during lightning
             const fadeAlpha = 1 - lightningProgress;
             ctx.globalAlpha = fadeAlpha;
           }
           
-          // Don't render constellation if lightning has struck
           if (lightningStrike) return;
           
           ctx.globalCompositeOperation = 'screen';
@@ -424,7 +417,6 @@
             const tw = 0.6 + 0.4*Math.sin((t*0.003 + i)*0.9*tempo) + burst*0.6;
             const glow = 18 + repeatBoost*10;
             
-            // star
             ctx.shadowBlur = glow;
             ctx.shadowColor = `hsla(${hueAccent}, 100%, 70%, 0.8)`;
             ctx.fillStyle = `hsla(${hueAccent}, 100%, 85%, 0.9)`;
@@ -432,7 +424,6 @@
             ctx.arc(a.x, a.y, a.r + tw, 0, Math.PI*2);
             ctx.fill();
             
-            // link to nearest already-revealed neighbors
             let neighbors = [];
             for (let j = 0; j < N; j++) {
               if (j === i) continue;
@@ -467,38 +458,32 @@
           
           for (let i = explosionParticles.length - 1; i >= 0; i--) {
             const p = explosionParticles[i];
-            
-            // Update particle
-            p.x += p.vx * 0.016; // 60fps
+            p.x += p.vx * 0.016;
             p.y += p.vy * 0.016;
-            p.vx *= 0.98; // slow down
+            p.vx *= 0.98;
             p.vy *= 0.98;
-            p.life -= 0.016 * 0.5; // fade out
+            p.life -= 0.016 * 0.5;
             
-            // Render particle
             const alpha = Math.max(0, p.life);
             const size = p.size * (0.5 + p.life * 0.5);
             
             ctx.fillStyle = `hsla(${p.hue}, 100%, 80%, ${alpha})`;
             ctx.shadowBlur = 15 * alpha;
             ctx.shadowColor = `hsla(${p.hue}, 100%, 70%, ${alpha})`;
-            
             ctx.beginPath();
             ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
             ctx.fill();
             
-            // Remove dead particles
             if (p.life <= 0) {
               explosionParticles.splice(i, 1);
             }
           }
-          
           ctx.restore();
         }
 
         let prevTime = performance.now();
         function step(t=0) {
-          const dt = Math.min(50, t - prevTime); // cap delta
+          const dt = Math.min(50, t - prevTime);
           prevTime = t;
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           drawNebula();
@@ -506,7 +491,7 @@
           drawDustSparkles(t);
           drawShootingStars(dt);
           drawConstellation(t);
-          drawExplosionParticles(t); // Draw explosion particles
+          drawExplosionParticles(t);
           requestAnimationFrame(step);
         }
 
@@ -515,19 +500,14 @@
 
       // Initialize with empty state
       if (canvas) {
-        // Start with just the background animation
         let prevTime = performance.now();
         function backgroundStep(t=0) {
           const dt = Math.min(50, t - prevTime);
           prevTime = t;
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          
-          // Draw a simple background
           ctx.save();
           ctx.fillStyle = '#0a0a0a';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Draw some subtle stars
           ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
           for (let i = 0; i < 50; i++) {
             const x = (i * 12345) % canvas.width;
@@ -538,7 +518,6 @@
             ctx.fill();
           }
           ctx.restore();
-          
           requestAnimationFrame(backgroundStep);
         }
         requestAnimationFrame(backgroundStep);
@@ -547,4 +526,3 @@
   </script>
 </body>
 </html>
-
