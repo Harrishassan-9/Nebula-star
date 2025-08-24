@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Personalized Nebula</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <canvas id="particles"></canvas>
+
+  <main class="center-stage" id="main-content">
+    <section class="glass card intro-card" id="intro-card">
+      <h1>Enter Your Name</h1>
+      <p>Generate a unique animated nebula crafted just for you.</p>
+      <form class="name-form" id="name-form">
+        <input type="text" name="name" placeholder="Type your name" autocomplete="off" required>
+        <button type="submit" class="cta">Create My Nebula</button>
+      </form>
+      <div class="tips">
+        <span>Hint: Different names create different colors, shapes, and motion.</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function() {
+      const root = document.documentElement;
+      const main = document.querySelector('main.center-stage');
+      const canvas = document.getElementById('particles');
+      const ctx = canvas.getContext('2d');
+      const nameForm = document.getElementById('name-form');
+      const introCard = document.getElementById('intro-card');
+
+      // Handle form submission
+      nameForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const name = this.querySelector('input[name="name"]').value;
+        if (name.trim()) {
+          introCard.style.display = 'none';
+          // Set the name for the constellation generation
+          main.dataset.name = name;
+          // Initialize the constellation system
+          initConstellation(name);
+        }
+      });
+
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      function hashString(str) {
+        let h = 2166136261 >>> 0;
+        for (let i = 0; i < str.length; i++) {
+          h ^= str.charCodeAt(i);
+          h = Math.imul(h, 16777619) >>> 0;
+        }
+        return h >>> 0;
+      }
+
+      function seededRandom(seed) {
+        // xorshift32
+        let x = (seed || 1) >>> 0;
+        return function() {
+          x ^= x << 13; x >>>= 0;
+          x ^= x >> 17; x >>>= 0;
+          x ^= x << 5;  x >>>= 0;
+          return (x >>> 0) / 4294967296;
+        }
+      }
+
+      function initConstellation(nameText) {
+        const seed = nameText ? hashString(nameText) : hashString('default');
+        let variant = 0;
+        let rnd = seededRandom(seed);
+
+        let hueBase = Math.floor(rnd() * 360);
+        let hueAccent = (hueBase + Math.floor(120 + rnd()*120)) % 360;
+        let tempo = 1.2 + rnd() * 1.2;
+        let density = 120 + Math.floor(rnd() * 80);
+
+        root.style.setProperty('--hue', hueBase);
+        root.style.setProperty('--hue-accent', hueAccent);
+        root.style.setProperty('--tempo', tempo.toFixed(2));
+
+        // Particles
+        // Offscreen canvas for text sampling
+        const oc = document.createElement('canvas');
+        const octx = oc.getContext('2d');
+
+        function generateConstellationPoints(text) {
+          if (!text) return [];
+          const maxWidth = Math.min(canvas.width * 0.7, 900);
+          const baseFont = Math.max(64, Math.min(240, Math.floor(maxWidth / Math.max(3, text.length) * 1.1)));
+          oc.width = Math.max(1, Math.floor(maxWidth));
+          oc.height = Math.max(1, Math.floor(baseFont * 1.6));
+
+          octx.clearRect(0, 0, oc.width, oc.height);
+          octx.fillStyle = '#fff';
+          octx.textAlign = 'center';
+          octx.textBaseline = 'middle';
+          octx.font = `700 ${baseFont}px Inter, system-ui`;
+          octx.shadowColor = 'rgba(255,255,255,0)';
+          octx.fillText(text.toUpperCase(), oc.width/2, oc.height/2);
+
+          const img = octx.getImageData(0, 0, oc.width, oc.height);
+          const data = img.data;
+          const step = Math.max(4, Math.floor(baseFont/14));
+          const points = [];
+          for (let y = 0; y < oc.height; y += step) {
+            for (let x = 0; x < oc.width; x += step) {
+              const i = (y * oc.width + x) * 4;
+              const a = data[i+3];
+              if (a > 40 && (x+y) % (step*2) !== 0) {
+                points.push({
+                  x: x + (rnd()-0.5) * step * 0.6,
+                  y: y + (rnd()-0.5) * step * 0.6,
+                  r: 0.9 + rnd()*1.8,
+                });
+              }
+            }
+          }
+          // Center the points and scale to viewport
+          const scale = Math.min(canvas.width * 0.75 / oc.width, canvas.height * 0.45 / oc.height);
+          const offsetX = canvas.width/2 - (oc.width * scale)/2;
+          const offsetY = canvas.height/2 - (oc.height * scale)/2 + Math.min(30, canvas.height*0.03);
+          for (let p of points) {
+            p.x = p.x * scale + offsetX;
+            p.y = p.y * scale + offsetY;
+          }
+          return points;
+        }
+
+        let letterRegions = [];
+        let constellation = [];
+        const letterCounts = (() => {
+          const map = {};
+          for (const ch of (nameText.toUpperCase())) map[ch] = (map[ch]||0)+1;
+          return map;
+        })();
+
+        // Build letter regions for repeat detection
+        (function buildLetterRegions(){
+          const maxWidth = Math.min(canvas.width * 0.7, 900);
+          const baseFont = Math.max(64, Math.min(240, Math.floor(maxWidth / Math.max(3, nameText.length) * 1.1)));
+          oc.width = Math.max(1, Math.floor(maxWidth));
+          oc.height = Math.max(1, Math.floor(baseFont * 1.6));
+          octx.clearRect(0,0,oc.width, oc.height);
+          octx.font = `700 ${baseFont}px Inter, system-ui`;
+          const letters = nameText.toUpperCase().split('');
+          const widths = letters.map(ch => octx.measureText(ch).width);
+          const total = widths.reduce((a,b)=>a+b,0);
+          const spacing = Math.max(0, (oc.width - total) / Math.max(letters.length-1, 1));
+          let x = (oc.width - (total + spacing*(letters.length-1)))/2;
+          letterRegions = letters.map((ch, idx) => {
+            const w = widths[idx];
+            const region = { ch, x0: x, x1: x+w };
+            x += w + spacing;
+            return region;
+          });
+        })();
+
+        function generateConstellationWithLetters(text){
+          const pts = generateConstellationPoints(text);
+          // Tag each point with its letter by x-range using inverse transform
+          const scale = Math.min(canvas.width * 0.75 / oc.width, canvas.height * 0.45 / oc.height);
+          const offsetX = canvas.width/2 - (oc.width * scale)/2;
+          const xToOriginal = x => (x - offsetX) / scale;
+          for (const p of pts){
+            const ox = xToOriginal(p.x);
+            const reg = letterRegions.find(r => ox >= r.x0 && ox <= r.x1);
+            p.ch = reg ? reg.ch : '?';
+          }
+          return { pts };
+        }
+
+        const { pts: initialPts } = generateConstellationWithLetters(nameText);
+        constellation = initialPts;
+
+        // Progressive reveal state (faster)
+        let reveal = 0; // number of points revealed
+        const revealSpeed = Math.max(40, 160 - Math.floor(tempo*60)); // ms per star (faster)
+        let lastReveal = performance.now();
+        let revealCompleted = false;
+        
+        // Lightning strike effect
+        let lightningStrike = false;
+        let lightningTime = 0;
+        let lightningDuration = 3000; // lightning flash duration - increased to 3 seconds for slower effect
+        let explosionParticles = [];
+        let explosionStarted = false;
+
+        // Shooting stars
+        const shooting = [];
+        function spawnShootingStar() {
+          const dir = rnd() < 0.5 ? 1 : -1;
+          const startX = dir === 1 ? -100 : canvas.width + 100;
+          const startY = rnd()*canvas.height*0.6;
+          const speed = 600 + rnd()*600;
+          shooting.push({ x:startX, y:startY, vx: dir*speed, vy: speed*0.25, life: 0.9, maxLife: 0.9 });
+        }
+        let lastShoot = 0;
+
+        // View transform for zoom/pan
+        const view = { x: 0, y: 0, scale: 1 };
+        const viewMin = 0.5, viewMax = 2.5;
+        function screenToWorld(x, y){
+          const cx = canvas.width/2, cy = canvas.height/2;
+          return { x: (x - cx)/view.scale - view.x + cx, y: (y - cy)/view.scale - view.y + cy };
+        }
+        function applyView(){
+          ctx.translate(canvas.width/2, canvas.height/2);
+          ctx.scale(view.scale, view.scale);
+          ctx.translate(-canvas.width/2 + view.x, -canvas.height/2 + view.y);
+        }
+        let dragging = false; let dragStart = {x:0,y:0}; let viewStart = {x:0,y:0};
+        canvas.addEventListener('mousedown', e=>{ dragging = true; dragStart = {x:e.clientX,y:e.clientY}; viewStart = {...view}; });
+        window.addEventListener('mouseup', ()=> dragging=false);
+        window.addEventListener('mousemove', e=>{
+          if(!dragging) return;
+          const dx = (e.clientX - dragStart.x) / view.scale;
+          const dy = (e.clientY - dragStart.y) / view.scale;
+          view.x = viewStart.x + dx;
+          view.y = viewStart.y + dy;
+        });
+        canvas.addEventListener('wheel', e=>{
+          e.preventDefault();
+          const delta = -Math.sign(e.deltaY) * 0.15;
+          const target = Math.min(viewMax, Math.max(viewMin, view.scale * (1 + delta)));
+          // Zoom towards cursor
+          const before = screenToWorld(e.clientX, e.clientY);
+          view.scale = target;
+          const after = screenToWorld(e.clientX, e.clientY);
+          view.x += (after.x - before.x);
+          view.y += (after.y - before.y);
+        }, { passive: false });
+        canvas.addEventListener('dblclick', ()=>{ view.x = 0; view.y = 0; view.scale = 1; });
+
+        // Background field elements
+        const dustCount = 120 + Math.floor(rnd()*80);
+        const dust = Array.from({length: dustCount}, () => ({
+          x: rnd()*canvas.width,
+          y: rnd()*canvas.height,
+          r: rnd()*1.2 + 0.2,
+          tw: rnd()*Math.PI*2
+        }));
+
+        // Nebula blobs definition
+        const blobs = Array.from({length: 6}, (_, i) => ({
+          x: rnd()*canvas.width,
+          y: rnd()*canvas.height*0.8,
+          r: Math.max(canvas.width, canvas.height) * (0.18 + rnd()*0.22),
+          hue: [hueBase, hueAccent, (hueBase+300)%360, (hueAccent+60)%360, (hueBase+40)%360, (hueAccent+300)%360][i%6],
+          alpha: 0.06 + rnd()*0.08
+        }));
+
+        // Light galaxies
+        const galaxies = Array.from({length: 2 + Math.floor(rnd()*2)}, () => ({
+          x: rnd()*canvas.width,
+          y: rnd()*canvas.height*0.6,
+          r: 60 + rnd()*120,
+          rot: rnd()*Math.PI*2,
+          hue: (hueAccent + Math.floor(rnd()*90))%360
+        }));
+
+        function drawNebula() {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          for (const b of blobs) {
+            const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+            grad.addColorStop(0, `hsla(${b.hue}, 90%, 55%, ${b.alpha})`);
+            grad.addColorStop(0.6, `hsla(${b.hue}, 90%, 50%, ${b.alpha*0.35})`);
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        function drawDustSparkles(t) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'screen';
+          for (const s of dust) {
+            const twinkle = (Math.sin(t*0.0015 + s.tw) + 1)/2; // 0..1
+            const alpha = 0.12 + twinkle*0.4;
+            ctx.fillStyle = `hsla(${hueBase}, 100%, ${70 + twinkle*20}%, ${alpha})`;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.r + twinkle*0.8, 0, Math.PI*2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        function drawGalaxies(t) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'screen';
+          for (const g of galaxies) {
+            ctx.translate(g.x, g.y);
+            ctx.rotate(g.rot + t*0.00005*tempo);
+            for (let arm = 0; arm < 3; arm++) {
+              ctx.rotate((Math.PI*2)/3);
+              for (let i = 0; i < 40; i++) {
+                const rr = (i/40) * g.r;
+                const a = 0.22 * (1 - i/40);
+                ctx.fillStyle = `hsla(${g.hue}, 90%, ${60 - i/2}%, ${a})`;
+                ctx.beginPath();
+                ctx.arc(rr, 0, 1.2 + (1 - i/40)*1.6, 0, Math.PI*2);
+                ctx.fill();
+              }
+            }
+            ctx.setTransform(1,0,0,1,0,0);
+          }
+          ctx.restore();
+        }
+
+        function drawShootingStars(dt){
+          // spawn occasionally
+          lastShoot += dt;
+          if (lastShoot > 2000 + rnd()*2500) { lastShoot = 0; spawnShootingStar(); }
+          ctx.save();
+          applyView();
+          for (let i = shooting.length-1; i >= 0; i--) {
+            const s = shooting[i];
+            s.x += s.vx * dt/1000;
+            s.y += s.vy * dt/1000;
+            s.life -= dt/2000;
+            ctx.globalAlpha = Math.max(0, s.life);
+            const grd = ctx.createLinearGradient(s.x-40, s.y-40, s.x, s.y);
+            grd.addColorStop(0, `hsla(${hueAccent},100%,80%,0)`);
+            grd.addColorStop(1, `hsla(${hueAccent},100%,85%,0.9)`);
+            ctx.strokeStyle = grd;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(s.x-80, s.y-80);
+            ctx.lineTo(s.x, s.y);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            if (s.life <= 0 || s.x < -200 || s.x > canvas.width+200 || s.y > canvas.height+200) shooting.splice(i,1);
+          }
+          ctx.restore();
+        }
+
+        function drawConstellation(t) {
+          if (!constellation.length) return;
+          ctx.save();
+          applyView();
+          
+          // Progressive reveal
+          const now = performance.now();
+          while (reveal < constellation.length && now - lastReveal > revealSpeed) {
+            reveal++;
+            lastReveal += revealSpeed;
+          }
+          const N = Math.max(1, reveal);
+          
+          // Start fade out after reveal completes
+          if (!revealCompleted && N >= constellation.length) {
+            revealCompleted = true;
+            // Trigger lightning strike instead of fade out
+            lightningStrike = true;
+            lightningTime = now;
+            // Create explosion particles from constellation points
+            explosionParticles = constellation.map(p => ({
+              x: p.x,
+              y: p.y,
+              vx: (rnd() - 0.5) * 400, // random velocity
+              vy: (rnd() - 0.5) * 400,
+              life: 1.0,
+              maxLife: 1.0,
+              size: p.r * 0.8,
+              hue: hueAccent
+            }));
+            explosionStarted = true;
+          }
+          
+          // Lightning strike effect
+          if (lightningStrike) {
+            const lightningProgress = (now - lightningTime) / lightningDuration;
+            if (lightningProgress >= 1) {
+              lightningStrike = false;
+              return; // Don't render constellation after lightning
+            }
+            
+            // Lightning flash effect - only on constellation area
+            if (lightningProgress < 0.6) { // Increased from 0.3 to 0.6 for longer flash
+              ctx.save();
+              ctx.globalCompositeOperation = 'screen';
+              
+              // Calculate constellation bounds
+              const minX = Math.min(...constellation.map(p => p.x));
+              const maxX = Math.max(...constellation.map(p => p.x));
+              const minY = Math.min(...constellation.map(p => p.y));
+              const maxY = Math.max(...constellation.map(p => p.y));
+              const padding = 50;
+              
+              // Draw lightning flash only in constellation area - more gradual fade
+              ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * (1 - lightningProgress/0.6)})`;
+              ctx.fillRect(minX - padding, minY - padding, maxX - minX + 2*padding, maxY - minY + 2*padding);
+              ctx.restore();
+            }
+            
+            // Fade out constellation during lightning
+            const fadeAlpha = 1 - lightningProgress;
+            ctx.globalAlpha = fadeAlpha;
+          }
+          
+          // Don't render constellation if lightning has struck
+          if (lightningStrike) return;
+          
+          ctx.globalCompositeOperation = 'screen';
+          ctx.lineWidth = 0.9;
+          
+          for (let i = 0; i < N; i++) {
+            const a = constellation[i];
+            const countThisLetter = (letterCounts[a.ch] || 1);
+            const repeatBoost = Math.max(0, countThisLetter - 1);
+            const burst = repeatBoost > 0 ? (0.8 + 0.2*Math.sin((t*0.01 + i)*2.0)) : 0;
+            const tw = 0.6 + 0.4*Math.sin((t*0.003 + i)*0.9*tempo) + burst*0.6;
+            const glow = 18 + repeatBoost*10;
+            
+            // star
+            ctx.shadowBlur = glow;
+            ctx.shadowColor = `hsla(${hueAccent}, 100%, 70%, 0.8)`;
+            ctx.fillStyle = `hsla(${hueAccent}, 100%, 85%, 0.9)`;
+            ctx.beginPath();
+            ctx.arc(a.x, a.y, a.r + tw, 0, Math.PI*2);
+            ctx.fill();
+            
+            // link to nearest already-revealed neighbors
+            let neighbors = [];
+            for (let j = 0; j < N; j++) {
+              if (j === i) continue;
+              const b = constellation[j];
+              const dx = a.x - b.x, dy = a.y - b.y;
+              const d2 = dx*dx + dy*dy;
+              neighbors.push({j, d2});
+            }
+            neighbors.sort((u,v)=>u.d2-v.d2);
+            const maxLinks = 3;
+            for (let k = 0; k < Math.min(maxLinks, neighbors.length); k++) {
+              const b = constellation[neighbors[k].j];
+              const d = Math.sqrt(neighbors[k].d2);
+              if (d < Math.min(canvas.width, canvas.height) * 0.12) {
+                const alpha = 0.35 * (1 - d / (Math.min(canvas.width, canvas.height) * 0.12));
+                ctx.strokeStyle = `hsla(${hueBase}, 100%, 75%, ${alpha})`;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+              }
+            }
+          }
+          ctx.restore();
+        }
+        
+        function drawExplosionParticles(t) {
+          if (!explosionStarted || explosionParticles.length === 0) return;
+          
+          ctx.save();
+          ctx.globalCompositeOperation = 'screen';
+          
+          for (let i = explosionParticles.length - 1; i >= 0; i--) {
+            const p = explosionParticles[i];
+            
+            // Update particle
+            p.x += p.vx * 0.016; // 60fps
+            p.y += p.vy * 0.016;
+            p.vx *= 0.98; // slow down
+            p.vy *= 0.98;
+            p.life -= 0.016 * 0.5; // fade out
+            
+            // Render particle
+            const alpha = Math.max(0, p.life);
+            const size = p.size * (0.5 + p.life * 0.5);
+            
+            ctx.fillStyle = `hsla(${p.hue}, 100%, 80%, ${alpha})`;
+            ctx.shadowBlur = 15 * alpha;
+            ctx.shadowColor = `hsla(${p.hue}, 100%, 70%, ${alpha})`;
+            
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Remove dead particles
+            if (p.life <= 0) {
+              explosionParticles.splice(i, 1);
+            }
+          }
+          
+          ctx.restore();
+        }
+
+        let prevTime = performance.now();
+        function step(t=0) {
+          const dt = Math.min(50, t - prevTime); // cap delta
+          prevTime = t;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          drawNebula();
+          drawGalaxies(t);
+          drawDustSparkles(t);
+          drawShootingStars(dt);
+          drawConstellation(t);
+          drawExplosionParticles(t); // Draw explosion particles
+          requestAnimationFrame(step);
+        }
+
+        if (canvas) requestAnimationFrame(step);
+      }
+
+      // Initialize with empty state
+      if (canvas) {
+        // Start with just the background animation
+        let prevTime = performance.now();
+        function backgroundStep(t=0) {
+          const dt = Math.min(50, t - prevTime);
+          prevTime = t;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw a simple background
+          ctx.save();
+          ctx.fillStyle = '#0a0a0a';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw some subtle stars
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+          for (let i = 0; i < 50; i++) {
+            const x = (i * 12345) % canvas.width;
+            const y = (i * 67890) % canvas.height;
+            const size = 0.5 + (i % 3) * 0.5;
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+          
+          requestAnimationFrame(backgroundStep);
+        }
+        requestAnimationFrame(backgroundStep);
+      }
+    })();
+  </script>
+</body>
+</html>
+
